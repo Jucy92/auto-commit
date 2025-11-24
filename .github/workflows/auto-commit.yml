@@ -1,0 +1,37 @@
+name: Daily Auto Commit Check
+
+on:
+  schedule:
+    # 매일 14:50 UTC (한국 시간 23:50 KST)
+    - cron: '50 14 * * *'
+
+  # 수동 실행 가능
+  workflow_dispatch:
+
+jobs:
+  check-and-commit:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check commits and auto-commit
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARGET_USER: Jucy92
+        run: node src/check-and-commit.js

@@ -1,0 +1,21 @@
+{
+  "name": "auto-commit-tracker",
+  "version": "1.0.0",
+  "description": "Automatic daily commit tracker for GitHub",
+  "main": "src/check-and-commit.js",
+  "scripts": {
+    "start": "node src/check-and-commit.js",
+    "test": "node src/check-and-commit.js"
+  },
+  "keywords": [
+    "github",
+    "commit",
+    "tracker",
+    "automation"
+  ],
+  "author": "Jucy92",
+  "license": "MIT",
+  "dependencies": {
+    "@octokit/rest": "^20.0.2"
+  }
+}
