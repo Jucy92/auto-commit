@@ -1,37 +1,155 @@
+# ============================================
+# GitHub Actions 워크플로우 설정 파일
+# ============================================
+# 이 파일은 GitHub Actions를 통해 자동으로 실행되는 작업을 정의합니다.
+# 파일 위치: .github/workflows/ 폴더 안에 있어야 GitHub이 인식합니다.
+
+# 워크플로우 이름 (GitHub Actions 탭에서 보이는 이름)
 name: Daily Auto Commit Check
 
+# ============================================
+# 트리거 설정: 언제 이 워크플로우를 실행할지 정의
+# ============================================
 on:
+  # 1. 스케줄 트리거: 정해진 시간에 자동 실행
   schedule:
-    # 매일 14:50 UTC (한국 시간 23:50 KST)
+    # cron 표현식: '분 시 일 월 요일'
+    # '50 14 * * *' 의미:
+    #   - 50: 50분
+    #   - 14: 14시 (UTC 기준)
+    #   - *: 매일
+    #   - *: 매월
+    #   - *: 매요일
+    #
+    # 주의: GitHub Actions는 UTC 시간대 사용
+    # 한국 시간 23:50 = UTC 14:50 (한국이 UTC+9시간)
     - cron: '50 14 * * *'
 
-  # 수동 실행 가능
+  # 2. 수동 트리거: GitHub 웹에서 직접 실행 가능
+  # Actions 탭 → 워크플로우 선택 → "Run workflow" 버튼으로 실행
   workflow_dispatch:
 
+# ============================================
+# 작업 정의: 실제로 수행할 작업들
+# ============================================
 jobs:
+  # Job 이름: check-and-commit
+  # 하나의 워크플로우는 여러 개의 Job을 가질 수 있음
   check-and-commit:
+
+    # 실행 환경: Ubuntu 최신 버전의 가상 머신에서 실행
+    # GitHub이 제공하는 무료 서버 사용
     runs-on: ubuntu-latest
 
+    # ============================================
+    # 권한 설정: 이 워크플로우가 할 수 있는 작업 정의
+    # ============================================
     permissions:
+      # contents: write
+      # - 저장소의 파일을 읽고 쓸 수 있는 권한
+      # - 이게 있어야 자동 커밋(git push)이 가능
+      # - 없으면 "Permission denied" 에러 발생
       contents: write
 
+    # ============================================
+    # 단계(Steps): 순차적으로 실행되는 명령들
+    # ============================================
     steps:
+      # ------------------------------------------
+      # Step 1: 저장소 체크아웃
+      # ------------------------------------------
+      # 현재 저장소의 코드를 가상 머신으로 다운로드
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4  # GitHub 공식 액션 사용
         with:
+          # fetch-depth: 0
+          # - Git 히스토리 전체를 가져옴
+          # - 0 = 전체 히스토리, 1 = 최신 커밋만
+          # - 자동 커밋을 위해 전체 히스토리 필요
           fetch-depth: 0
 
+      # ------------------------------------------
+      # Step 2: Node.js 설치
+      # ------------------------------------------
+      # JavaScript 실행을 위한 Node.js 환경 설정
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v4  # GitHub 공식 Node.js 설치 액션
         with:
+          # Node.js 버전 20 사용 (최신 LTS 버전)
           node-version: '20'
+
+          # npm 캐시 활성화
+          # - node_modules를 캐시해서 다음 실행 시 빠르게 복원
+          # - 매번 npm install 하는 시간 절약
           cache: 'npm'
 
+      # ------------------------------------------
+      # Step 3: npm 패키지 설치
+      # ------------------------------------------
+      # package.json에 정의된 의존성 패키지 설치
       - name: Install dependencies
+        # npm ci: npm install과 비슷하지만 더 빠르고 안정적
+        # - package-lock.json을 기반으로 정확한 버전 설치
+        # - CI/CD 환경에 최적화
         run: npm ci
 
+      # ------------------------------------------
+      # Step 4: 메인 스크립트 실행
+      # ------------------------------------------
+      # 커밋 체크 및 자동 커밋 실행
       - name: Check commits and auto-commit
+        # ========================================
+        # 환경 변수 설정
+        # ========================================
+        # 이 환경 변수들은 Node.js 스크립트에서
+        # process.env.변수명 으로 접근 가능
         env:
+          # GITHUB_TOKEN: GitHub API 인증 토큰
+          # -------------------------------------
+          # ${{ secrets.GITHUB_TOKEN }}의 의미:
+          #   - secrets: GitHub에서 자동으로 제공하는 시크릿 저장소
+          #   - GITHUB_TOKEN: GitHub이 자동 생성한 임시 토큰
+          #   - 이 워크플로우가 실행되는 동안만 유효
+          #   - 별도 설정 불필요 (자동으로 생성됨)
+          #
+          # 사용 목적:
+          #   - GitHub API 호출 시 인증
+          #   - 사용자의 커밋 정보 조회
+          #   - git push 권한 부여
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+          # TARGET_USER: 체크할 GitHub 사용자명
+          # -------------------------------------
+          # 이 사용자의 커밋을 체크함
+          # 다른 사용자를 체크하려면 여기를 수정
           TARGET_USER: Jucy92
+
+        # Node.js로 메인 스크립트 실행
+        # src/check-and-commit.js 파일이 실행됨
         run: node src/check-and-commit.js
+
+# ============================================
+# 추가 설명
+# ============================================
+#
+# 1. secrets.GITHUB_TOKEN이란?
+#    - GitHub이 자동으로 생성하는 임시 토큰
+#    - 이 워크플로우 실행 중에만 유효
+#    - 저장소에 대한 읽기/쓰기 권한 포함
+#    - 별도로 만들 필요 없음 (자동 제공)
+#
+# 2. 환경 변수 접근 방법:
+#    - JavaScript: process.env.GITHUB_TOKEN
+#    - JavaScript: process.env.TARGET_USER
+#
+# 3. 이 파일을 수정하려면:
+#    - 저장소 Settings → Actions → General
+#    - Workflow permissions → Read and write 선택
+#
+# 4. 수동 실행 방법:
+#    - Actions 탭 → 워크플로우 선택 → Run workflow
+#
+# 5. 스케줄 변경 방법:
+#    - cron 표현식 수정
+#    - 예: '0 15 * * *' = 매일 한국시간 00:00
+#    - 예: '30 9 * * 1' = 매주 월요일 한국시간 18:30
