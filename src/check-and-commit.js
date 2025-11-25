@@ -63,15 +63,46 @@ async function hasManualCommitToday(username, date) {
         console.log(`   커밋 개수: ${commits.length}개`);
 
         if (commits.length === 0) {
-          // ⚠️ commits가 비어있는 경우
-          // → 일단 수동 커밋으로 간주 (안전)
-          // → 나중에 자동 커밋이면 다음 실행 때 카운터 리셋됨
+          // ⚠️ commits가 비어있는 경우 → Commits API로 직접 조회
           console.log(`   → ⚠️ 커밋 정보 없음 (API 제한)`);
-          console.log(`   → 📌 수동 커밋으로 간주 (안전 모드)`);
-          manualCommitCount++;
-          console.log('\n' + '='.repeat(60));
-          console.log('✅ 수동 커밋 발견! (커밋 정보 없지만 PushEvent 존재)');
-          return true;
+          console.log(`   → 🔍 Commits API로 직접 조회...`);
+
+          try {
+            const [owner, repo] = repoName.split('/');
+            const { data: repoCommits } = await octokit.repos.listCommits({
+              owner: owner,
+              repo: repo,
+              per_page: 5,
+              since: `${date}T00:00:00Z`,
+              until: `${date}T23:59:59Z`,
+            });
+
+            console.log(`   → 📋 조회된 커밋: ${repoCommits.length}개`);
+
+            for (const commit of repoCommits) {
+              const message = commit.commit.message.toLowerCase();
+              const isAutoCommit = message.includes('auto commit');
+
+              console.log(`   - "${commit.commit.message}"`);
+              console.log(`     ${isAutoCommit ? '(자동 커밋 - 제외)' : '(✅ 수동 커밋!)'}`);
+
+              if (!isAutoCommit) {
+                manualCommitCount++;
+                console.log('\n' + '='.repeat(60));
+                console.log('✅ 수동 커밋 발견! (Commits API 조회)');
+                console.log(`   저장소: ${repoName}`);
+                console.log(`   메시지: "${commit.commit.message}"`);
+                return true;
+              } else {
+                autoCommitCount++;
+              }
+            }
+          } catch (error) {
+            console.log(`   → ⚠️ Commits API 조회 실패: ${error.message}`);
+            console.log(`   → 📌 안전하게 수동 커밋으로 간주`);
+            manualCommitCount++;
+            return true;
+          }
         } else {
           // 커밋 목록이 있는 경우 → 메시지로 판단
           for (const commit of commits) {
