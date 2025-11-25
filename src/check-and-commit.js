@@ -1,8 +1,6 @@
 // ============================================
-// 개선된 커밋 체크 로직
+// Auto Commit Tracker - 메인 스크립트 (개선 버전)
 // ============================================
-// 더 정확한 커밋 감지를 위한 개선 버전
-
 const { Octokit } = require('@octokit/rest');
 const fs = require('fs');
 const { execSync } = require('child_process');
@@ -17,29 +15,27 @@ const octokit = new Octokit({
   auth: GITHUB_TOKEN,
 });
 
+/**
+ * 오늘 날짜를 YYYY-MM-DD 형식으로 반환
+ */
 function getTodayDate() {
   const today = new Date();
   return today.toISOString().split('T')[0];
 }
 
-// ============================================
-// 개선된 커밋 체크 함수
-// ============================================
 /**
- * 여러 방법을 조합하여 오늘 커밋 여부 확인
- *
- * 방법 1: Public Events API (기존)
- * 방법 2: Search Commits API (더 정확)
- * 방법 3: 사용자 저장소 목록 + 각 저장소의 커밋 조회
+ * Public 저장소의 커밋만 체크 (2가지 방법)
+ * 1. Public Events API (빠름)
+ * 2. Search Commits API (더 정확)
  */
 async function hasManualCommitToday(username, date) {
-  console.log(`🔍 ${username}의 ${date} 커밋 조회 중...\n`);
+  console.log(`🔍 ${username}의 ${date} Public 커밋 조회 중...\n`);
 
   try {
     // ========================================
-    // 방법 1: Public Events API (빠르지만 제한적)
+    // 방법 1: Public Events API
     // ========================================
-    console.log('📡 방법 1: Public Events API 조회...');
+    console.log('📡 [방법 1] Public Events API 조회...');
     const hasCommitFromEvents = await checkCommitsFromEvents(username, date);
 
     if (hasCommitFromEvents) {
@@ -51,7 +47,7 @@ async function hasManualCommitToday(username, date) {
     // ========================================
     // 방법 2: Search Commits API (더 정확)
     // ========================================
-    console.log('\n📡 방법 2: Search Commits API 조회...');
+    console.log('\n📡 [방법 2] Search Commits API 조회...');
     const hasCommitFromSearch = await checkCommitsFromSearch(username, date);
 
     if (hasCommitFromSearch) {
@@ -60,20 +56,7 @@ async function hasManualCommitToday(username, date) {
     }
     console.log('❌ Search API에서도 수동 커밋 없음');
 
-    // ========================================
-    // 방법 3: 사용자 저장소 직접 조회 (가장 정확)
-    // ========================================
-    console.log('\n📡 방법 3: 사용자 저장소 직접 조회...');
-    const hasCommitFromRepos = await checkCommitsFromRepos(username, date);
-
-    if (hasCommitFromRepos) {
-      console.log('✅ 저장소에서 수동 커밋 발견!');
-      return true;
-    }
-    console.log('❌ 저장소에서도 수동 커밋 없음');
-
-    // 모든 방법에서 커밋을 찾지 못함
-    console.log('\n❌ 모든 방법에서 커밋을 찾지 못했습니다.');
+    console.log('\n❌ 결론: 모든 방법에서 수동 커밋을 찾지 못했습니다.');
     return false;
 
   } catch (error) {
@@ -84,7 +67,9 @@ async function hasManualCommitToday(username, date) {
 }
 
 /**
- * 방법 1: Public Events API로 커밋 확인
+ * Public Events API로 커밋 확인
+ * - 최근 100개 이벤트만 조회 (GitHub API 제한)
+ * - Public 이벤트만 조회 가능
  */
 async function checkCommitsFromEvents(username, date) {
   try {
@@ -93,41 +78,64 @@ async function checkCommitsFromEvents(username, date) {
       per_page: 100,
     });
 
+    console.log(`   → 조회된 이벤트: ${events.length}개`);
+
     const pushEvents = events.filter(event => event.type === 'PushEvent');
+    console.log(`   → PushEvent: ${pushEvents.length}개`);
+
+    let todayPushEvents = 0;
+    let todayCommits = 0;
 
     for (const event of pushEvents) {
       const eventDate = event.created_at.split('T')[0];
+      const eventTime = event.created_at.split('T')[1].split('Z')[0];
 
       if (eventDate === date) {
+        todayPushEvents++;
         const commits = event.payload.commits || [];
 
-        for (const commit of commits) {
-          const message = commit.message.toLowerCase();
+        console.log(`   → [${eventTime}] ${event.repo.name}: ${commits.length}개 커밋`);
 
-          if (!message.includes('auto commit')) {
-            console.log(`   → 발견: "${commit.message}" (${event.repo.name})`);
+        for (const commit of commits) {
+          todayCommits++;
+          const message = commit.message.toLowerCase();
+          const isAutoCommit = message.includes('auto commit');
+
+          console.log(`      - "${commit.message}" ${isAutoCommit ? '(자동 커밋 - 제외)' : '(수동 커밋!)'}`);
+
+          if (!isAutoCommit) {
+            console.log(`   ✅ 수동 커밋 발견!`);
             return true;
           }
         }
       }
     }
 
+    console.log(`   → ${date}의 PushEvent: ${todayPushEvents}개, 커밋: ${todayCommits}개`);
+
+    if (todayCommits > 0) {
+      console.log(`   ⚠️ 커밋은 있지만 모두 자동 커밋`);
+    }
+
     return false;
+
   } catch (error) {
-    console.error('   ⚠️ Events API 오류:', error.message);
+    console.error('   ❌ Events API 오류:', error.message);
     return false;
   }
 }
 
 /**
- * 방법 2: Search Commits API로 커밋 확인
- * 더 정확하지만 인증 필요
+ * Search Commits API로 커밋 확인
+ * - Public Events에서 못 찾은 경우 사용
+ * - 더 정확하지만 요청 제한이 있음
  */
 async function checkCommitsFromSearch(username, date) {
   try {
-    // GitHub Search API: author와 날짜로 커밋 검색
+    // GitHub Search API
     // 쿼리: "author:Jucy92 committer-date:2025-11-24"
     const query = `author:${username} committer-date:${date}`;
+    console.log(`   → 검색 쿼리: "${query}"`);
 
     const { data } = await octokit.search.commits({
       q: query,
@@ -142,83 +150,27 @@ async function checkCommitsFromSearch(username, date) {
       return false;
     }
 
-    // "auto commit"이 아닌 커밋이 있는지 확인
+    // 각 커밋 확인
     for (const item of data.items) {
       const message = item.commit.message.toLowerCase();
+      const isAutoCommit = message.includes('auto commit');
+      const repoName = item.repository.full_name;
+      const commitDate = item.commit.committer.date;
 
-      if (!message.includes('auto commit')) {
-        console.log(`   → 발견: "${item.commit.message}" (${item.repository.full_name})`);
+      console.log(`   → [${commitDate}] ${repoName}`);
+      console.log(`      - "${item.commit.message}" ${isAutoCommit ? '(자동 커밋 - 제외)' : '(수동 커밋!)'}`);
+
+      if (!isAutoCommit) {
+        console.log(`   ✅ 수동 커밋 발견!`);
         return true;
       }
     }
 
-    console.log('   → 모든 커밋이 자동 커밋');
+    console.log(`   ⚠️ ${data.total_count}개 커밋 모두 자동 커밋`);
     return false;
 
   } catch (error) {
-    console.error('   ⚠️ Search API 오류:', error.message);
-    // Search API 실패는 치명적이지 않음
-    return false;
-  }
-}
-
-/**
- * 방법 3: 사용자의 저장소 목록 가져와서 각 저장소의 커밋 조회
- * 가장 정확하지만 느림
- */
-async function checkCommitsFromRepos(username, date) {
-  try {
-    // 사용자의 저장소 목록 가져오기
-    const { data: repos } = await octokit.repos.listForUser({
-      username: username,
-      per_page: 100,
-      sort: 'updated',
-      type: 'all', // public + private (권한 있으면)
-    });
-
-    console.log(`   → 저장소: ${repos.length}개 확인 중...`);
-
-    // 최근 업데이트된 저장소부터 확인 (최적화)
-    for (const repo of repos.slice(0, 10)) { // 최근 10개만 확인
-      try {
-        // 해당 저장소의 오늘 커밋 조회
-        const since = new Date(date + 'T00:00:00Z').toISOString();
-        const until = new Date(date + 'T23:59:59Z').toISOString();
-
-        const { data: commits } = await octokit.repos.listCommits({
-          owner: username,
-          repo: repo.name,
-          since: since,
-          until: until,
-          author: username,
-          per_page: 100,
-        });
-
-        if (commits.length > 0) {
-          console.log(`   → ${repo.name}: ${commits.length}개 커밋 발견`);
-
-          // "auto commit"이 아닌 커밋 확인
-          for (const commit of commits) {
-            const message = commit.commit.message.toLowerCase();
-
-            if (!message.includes('auto commit')) {
-              console.log(`   → 발견: "${commit.commit.message}" (${repo.name})`);
-              return true;
-            }
-          }
-        }
-      } catch (repoError) {
-        // Private 저장소 접근 오류 등 무시
-        if (repoError.status !== 404 && repoError.status !== 403) {
-          console.error(`   ⚠️ ${repo.name} 조회 오류:`, repoError.message);
-        }
-      }
-    }
-
-    return false;
-
-  } catch (error) {
-    console.error('   ⚠️ Repos API 오류:', error.message);
+    console.error('   ❌ Search API 오류:', error.message);
     return false;
   }
 }
@@ -307,29 +259,35 @@ async function autoCommit(date) {
 }
 
 async function main() {
-  console.log('🚀 Auto Commit Tracker (개선 버전) 시작\n');
+  console.log('🚀 Auto Commit Tracker 시작\n');
+  console.log('='.repeat(60));
 
   const today = getTodayDate();
   console.log(`📅 오늘 날짜: ${today}`);
-  console.log(`👤 대상 사용자: ${TARGET_USER}\n`);
+  console.log(`👤 대상 사용자: ${TARGET_USER}`);
+  console.log(`🔑 토큰 설정: ${GITHUB_TOKEN ? '✅ 있음' : '❌ 없음'}`);
+  console.log('='.repeat(60) + '\n');
 
   try {
     const hasManualCommit = await hasManualCommitToday(TARGET_USER, today);
 
-    console.log('\n' + '='.repeat(50));
+    console.log('\n' + '='.repeat(60));
     if (hasManualCommit) {
-      console.log('✅ 결론: 오늘 수동 커밋이 있습니다. 카운터를 리셋합니다.');
-      console.log('='.repeat(50) + '\n');
+      console.log('✅ 최종 결론: 오늘 수동 커밋이 있습니다.');
+      console.log('   → 카운터를 0으로 리셋합니다.');
+      console.log('='.repeat(60) + '\n');
       resetCounter(today);
     } else {
-      console.log('❌ 결론: 오늘 수동 커밋이 없습니다. 자동 커밋을 실행합니다.');
-      console.log('='.repeat(50) + '\n');
+      console.log('❌ 최종 결론: 오늘 수동 커밋이 없습니다.');
+      console.log('   → 자동 커밋을 실행합니다.');
+      console.log('='.repeat(60) + '\n');
       await autoCommit(today);
     }
 
     console.log('\n🎉 작업 완료!');
   } catch (error) {
     console.error('\n❌ 오류 발생:', error.message);
+    console.error('Stack trace:', error.stack);
     process.exit(1);
   }
 }
@@ -339,3 +297,25 @@ if (require.main === module) {
 }
 
 module.exports = { main };
+
+// ============================================
+// 디버깅 팁
+// ============================================
+//
+// GitHub Actions 로그에서 다음을 확인하세요:
+//
+// 1. "조회된 이벤트: N개"
+//    - 100개 미만: 정상
+//    - 100개 정확히: 이벤트가 더 있을 수 있음 (오래된 커밋은 못 찾음)
+//
+// 2. "PushEvent: N개"
+//    - 0개: 최근에 푸시를 안 했거나, 모두 100개 범위 밖
+//
+// 3. "검색된 커밋: N개"
+//    - Search API가 더 정확함
+//    - 0개면 정말 커밋이 없는 것
+//
+// 4. 시간대 확인:
+//    - GitHub API는 UTC 시간
+//    - 한국 시간 자정 = UTC 15:00 전날
+//    - 예: 한국 2025-11-25 00:30 = UTC 2025-11-24 15:30
