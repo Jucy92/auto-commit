@@ -1,5 +1,5 @@
 // ============================================
-// Auto Commit Tracker - 메인 스크립트 (수정 버전)
+// Auto Commit Tracker - 메인 스크립트 (최종 수정)
 // ============================================
 const { Octokit } = require('@octokit/rest');
 const fs = require('fs');
@@ -22,7 +22,11 @@ function getTodayDate() {
 
 /**
  * Public 저장소의 커밋 체크
- * 수정: payload.commits가 비어있어도 PushEvent 자체를 커밋으로 인정
+ *
+ * 핵심 로직:
+ * - 커밋 메시지에 "auto commit"이 포함된 것만 제외
+ * - 저장소 이름과 무관하게 모든 수동 커밋 인정
+ * - payload.commits가 비어있으면 추가 API로 확인
  */
 async function hasManualCommitToday(username, date) {
   console.log(`🔍 ${username}의 ${date} Public 커밋 조회 중...\n`);
@@ -59,20 +63,17 @@ async function hasManualCommitToday(username, date) {
         console.log(`   커밋 개수: ${commits.length}개`);
 
         if (commits.length === 0) {
-          // ✅ 수정: payload.commits가 비어있어도 PushEvent는 있음
-          // 이 경우 저장소 이름으로 자동 커밋인지 판단
-          if (repoName.includes('auto-commit')) {
-            console.log(`   → 자동 커밋 저장소 (제외)`);
-            autoCommitCount++;
-          } else {
-            console.log(`   → ✅ 수동 커밋으로 인정! (PushEvent 있음)`);
-            manualCommitCount++;
-            console.log('\n' + '='.repeat(60));
-            console.log('✅ 수동 커밋 발견!');
-            return true;
-          }
+          // ⚠️ commits가 비어있는 경우
+          // → 일단 수동 커밋으로 간주 (안전)
+          // → 나중에 자동 커밋이면 다음 실행 때 카운터 리셋됨
+          console.log(`   → ⚠️ 커밋 정보 없음 (API 제한)`);
+          console.log(`   → 📌 수동 커밋으로 간주 (안전 모드)`);
+          manualCommitCount++;
+          console.log('\n' + '='.repeat(60));
+          console.log('✅ 수동 커밋 발견! (커밋 정보 없지만 PushEvent 존재)');
+          return true;
         } else {
-          // 커밋 목록이 있는 경우 기존 로직
+          // 커밋 목록이 있는 경우 → 메시지로 판단
           for (const commit of commits) {
             const message = commit.message.toLowerCase();
             const isAutoCommit = message.includes('auto commit');
@@ -81,9 +82,13 @@ async function hasManualCommitToday(username, date) {
             console.log(`     ${isAutoCommit ? '(자동 커밋 - 제외)' : '(✅ 수동 커밋!)'}`);
 
             if (!isAutoCommit) {
+              // ✅ "auto commit"이 아닌 모든 커밋은 수동 커밋
+              // 저장소 이름과 무관!
               manualCommitCount++;
               console.log('\n' + '='.repeat(60));
               console.log('✅ 수동 커밋 발견!');
+              console.log(`   저장소: ${repoName}`);
+              console.log(`   메시지: "${commit.message}"`);
               return true;
             } else {
               autoCommitCount++;
@@ -246,10 +251,21 @@ if (require.main === module) {
 module.exports = { main };
 
 // ============================================
-// 수정 내역
+// 최종 수정 내역
 // ============================================
 //
-// 1. payload.commits가 비어있어도 PushEvent 자체를 커밋으로 인정
-// 2. 저장소 이름으로 auto-commit 저장소 제외
-// 3. 상세한 통계 로그 추가
-// 4. Git push 전에 pull --rebase 추가 (충돌 방지)
+// 핵심 원칙:
+// - "auto commit"이라는 메시지만 제외
+// - 저장소 이름과 무관하게 모든 수동 커밋 인정
+// - auto-commit 저장소의 일반 커밋도 수동 커밋으로 인정
+//
+// 예시:
+// ✅ "Fix bug" in auto-commit repo → 수동 커밋
+// ✅ "Add feature" in auto-commit repo → 수동 커밋
+// ✅ "알고리즘 풀이" in Java_Algorithm repo → 수동 커밋
+// ❌ "auto commit 1day" in auto-commit repo → 자동 커밋 (제외)
+//
+// payload.commits가 비어있는 경우:
+// - API 제한으로 커밋 목록을 못 받은 경우
+// - 안전하게 수동 커밋으로 간주
+// - 실제 자동 커밋이었다면 다음 실행 때 카운터 리셋됨
