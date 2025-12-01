@@ -187,8 +187,8 @@ function appendLog(date, message) {
 function executeGitCommit(message) {
   try {
     console.log('\n🔧 Git 설정 중...');
-    execSync('git config user.name "GitHub Actions Bot"', { encoding: 'utf8' });
-    execSync('git config user.email "actions@github.com"', { encoding: 'utf8' });
+    execSync('git config user.name "Jucy92"', { encoding: 'utf8' });
+    execSync('git config user.email "cyju92@gmail.com"', { encoding: 'utf8' });
 
     console.log('📦 변경사항 스테이징...');
     execSync('git add counter.txt logs/', { encoding: 'utf8' });
