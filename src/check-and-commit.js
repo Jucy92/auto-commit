@@ -22,18 +22,32 @@ function getTodayDate() {
 }
 
 /**
- * Public 저장소의 커밋 체크 (신뢰성 개선 버전)
+ * Public 저장소의 커밋 체크 (신뢰성 개선 버전 - 타임존 수정)
  *
  * 핵심 로직:
  * - 모든 Public 저장소를 직접 조회 (Commits API)
  * - 커밋 메시지에 "auto commit"이 포함된 것만 제외
  * - 저장소 이름과 무관하게 모든 수동 커밋 인정
+ * - 한국 시간(UTC+9) 고려하여 전날 15:00 UTC부터 당일 14:59 UTC까지 조회
  */
 async function hasManualCommitToday(username, date) {
   console.log(`🔍 ${username}의 ${date} 커밋 조회 중 (Commits API 직접 조회)...\n`);
   console.log('='.repeat(60));
 
   try {
+    // 타임존 처리: 한국 시간 기준으로 전날 15:00 UTC ~ 당일 14:59 UTC 조회
+    // 예: 2025-12-04 조회 시 → 2025-12-03T15:00:00Z ~ 2025-12-04T14:59:59Z
+    // 이렇게 하면 한국 시간 12월 4일 00:00 ~ 23:59가 모두 포함됨
+    const dateObj = new Date(date);
+    const prevDate = new Date(dateObj);
+    prevDate.setDate(prevDate.getDate() - 1);
+
+    const sinceTime = `${prevDate.toISOString().split('T')[0]}T15:00:00Z`;
+    const untilTime = `${date}T14:59:59Z`;
+
+    console.log(`📅 조회 시간 범위 (UTC): ${sinceTime} ~ ${untilTime}`);
+    console.log(`   (한국 시간 ${date} 00:00 ~ 23:59 해당)\n`);
+
     // 1단계: 사용자의 모든 Public 저장소 가져오기
     console.log('📡 Public 저장소 목록 조회...');
     const { data: repos } = await octokit.repos.listForUser({
@@ -56,8 +70,8 @@ async function hasManualCommitToday(username, date) {
           owner: username,
           repo: repo.name,
           author: username,
-          since: `${date}T00:00:00Z`,
-          until: `${date}T23:59:59Z`,
+          since: sinceTime,
+          until: untilTime,
           per_page: 100,
         });
 
@@ -177,13 +191,17 @@ function executeGitCommit(message) {
     execSync('git config user.email "cyju92@gmail.com"', { encoding: 'utf8' });
 
     console.log('📦 변경사항 스테이징...');
-    // counter.txt와 logs/ 는 항상 추가
-    execSync('git add counter.txt logs/', { encoding: 'utf8' });
 
-    // last-run.txt는 존재할 때만 추가
+    // 스테이징할 파일 목록
+    const filesToAdd = ['counter.txt', 'logs/'];
+
+    // last-run.txt가 존재하면 추가
     if (fs.existsSync(LAST_RUN_FILE)) {
-      execSync('git add last-run.txt', { encoding: 'utf8' });
+      filesToAdd.push('last-run.txt');
+      console.log('   ✓ last-run.txt 포함');
     }
+
+    execSync(`git add ${filesToAdd.join(' ')}`, { encoding: 'utf8' });
 
     console.log(`💬 커밋 생성: "${message}"`);
     execSync(`git commit -m "${message}"`, { encoding: 'utf8' });
